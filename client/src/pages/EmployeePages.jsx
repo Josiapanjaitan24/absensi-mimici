@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/auth'
 import {
   createLeaveRequest,
   createScheduleChangeRequest,
   getActiveShifts,
   getAttendanceHistory,
+  getBranchAttendanceStatus,
   getBranches,
   getEmployeeSchedules,
   getLeaveRequests,
   getScheduleChangeRequests,
-  submitAttendance,
+  submitBranchAttendance,
 } from '../services/employeeApi'
 
 const getJakartaDate = () => new Intl.DateTimeFormat('en-CA', {
@@ -24,15 +25,17 @@ const formatDate = (value) => value
   ? new Intl.DateTimeFormat('id-ID', {
     dateStyle: 'medium',
     timeZone: 'Asia/Jakarta',
-  }).format(new Date(`${value}T12:00:00+07:00`))
+  }).format(new Date(`${String(value).slice(0, 10)}T12:00:00+07:00`))
   : '—'
 
 const formatDateTime = (value) => value
-  ? new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date(value))
+  ? /^\d{2}:\d{2}/.test(String(value))
+    ? `${String(value).slice(0, 5)} WIB`
+    : new Intl.DateTimeFormat('id-ID', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Jakarta',
+    }).format(new Date(value))
   : '—'
 
 const toClock = (value) => value ? value.slice(0, 5) : '—'
@@ -47,77 +50,12 @@ function PageHeading({ eyebrow, title, detail }) {
   )
 }
 
-export function EmployeeSchedulePage() {
-  const { token } = useAuth()
-  const [schedules, setSchedules] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    let active = true
-
-    getEmployeeSchedules(token)
-      .then((rows) => {
-        if (active) setSchedules(rows)
-      })
-      .catch((requestError) => {
-        if (active) setError(requestError.message)
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [token])
-
-  return (
-    <div className="dashboard-stack">
-      <PageHeading
-        eyebrow="Jadwal"
-        title="Jadwal kerja saya"
-        detail="Jadwal ditampilkan dari penugasan database untuk akun karyawan yang sedang masuk."
-      />
-
-      <section className="panel-block">
-        {loading && <p className="empty-state" role="status">Memuat jadwal kerja...</p>}
-        {error && <p className="empty-state error" role="alert">{error}</p>}
-        {!loading && !error && schedules.length === 0 && (
-          <div className="empty-state">Belum ada jadwal kerja pada bulan ini.</div>
-        )}
-        {!loading && !error && schedules.length > 0 && (
-          <div className="employee-record-list">
-            {schedules.map((schedule) => (
-              <article className="employee-record schedule-record" key={schedule.id_jadwal}>
-                <div className="record-mark" aria-hidden="true">J</div>
-                <div className="record-main">
-                  <strong>{formatDate(schedule.tanggal_kerja)}</strong>
-                  <span>{schedule.nama_shift || 'Shift belum ditentukan'} · {schedule.nama_cabang}</span>
-                  {schedule.catatan && <small>{schedule.catatan}</small>}
-                </div>
-                <div className="record-side">
-                  <span className="status-pill neutral">{schedule.status_jadwal}</span>
-                  <span className="record-time">
-                    {schedule.jam_masuk && schedule.jam_pulang
-                      ? `${toClock(schedule.jam_masuk)} – ${toClock(schedule.jam_pulang)}`
-                      : 'Jam belum ditentukan'}
-                  </span>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  )
-}
-
 export function AttendanceHistoryPage() {
   const { token } = useAuth()
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [refresh, setRefresh] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -136,7 +74,7 @@ export function AttendanceHistoryPage() {
     return () => {
       active = false
     }
-  }, [token])
+  }, [token, refresh])
 
   return (
     <div className="dashboard-stack">
@@ -148,13 +86,24 @@ export function AttendanceHistoryPage() {
 
       <section className="panel-block">
         {loading && <p className="empty-state" role="status">Memuat riwayat absensi...</p>}
-        {error && <p className="empty-state error" role="alert">{error}</p>}
+        {error && (
+          <div className="error-box" role="alert">
+            <span>{error}</span>
+            <button type="button" className="text-button" onClick={() => {
+              setLoading(true)
+              setError('')
+              setRefresh((value) => value + 1)
+            }}>
+              Coba lagi
+            </button>
+          </div>
+        )}
         {!loading && !error && records.length === 0 && (
           <div className="empty-state">Belum ada catatan absensi pada bulan ini.</div>
         )}
         {!loading && !error && records.length > 0 && (
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table mobile-card-table">
               <thead>
                 <tr>
                   <th>Tanggal</th>
@@ -167,11 +116,11 @@ export function AttendanceHistoryPage() {
               <tbody>
                 {records.map((record) => (
                   <tr key={record.id_absensi}>
-                    <td>{formatDate(record.tanggal_kerja)}</td>
-                    <td>{record.nama_cabang}<small>{record.nama_shift || 'Shift belum ditentukan'}</small></td>
-                    <td>{formatDateTime(record.waktu_masuk)}</td>
-                    <td>{formatDateTime(record.waktu_pulang)}</td>
-                    <td><span className="status-pill neutral">{record.status_kehadiran}</span></td>
+                    <td data-label="Tanggal">{formatDate(record.tanggal_kerja)}</td>
+                    <td data-label="Cabang / shift">{record.nama_cabang}<small>{record.nama_shift || 'Shift belum ditentukan'}</small></td>
+                    <td data-label="Masuk">{formatDateTime(record.waktu_masuk)}</td>
+                    <td data-label="Pulang">{formatDateTime(record.waktu_pulang)}</td>
+                    <td data-label="Status tercatat"><span className="status-pill neutral">{record.status_kehadiran}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -200,139 +149,414 @@ const getBrowserCoordinates = () => new Promise((resolve, reject) => {
 })
 
 export function AttendancePage() {
+  const { branchSlug } = useParams()
   const { token } = useAuth()
-  const [schedules, setSchedules] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [branches, setBranches] = useState([])
+  const [branchesLoading, setBranchesLoading] = useState(true)
+  const [branchError, setBranchError] = useState('')
+  const [attendanceStatusState, setAttendanceStatusState] = useState({
+    branchId: null,
+    value: null,
+    error: '',
+  })
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
-  const [busySchedule, setBusySchedule] = useState('')
+  const [cameraState, setCameraState] = useState({ branchSlug: null, open: false })
+  const [attendanceBusy, setAttendanceBusy] = useState(false)
   const [refresh, setRefresh] = useState(0)
 
   useEffect(() => {
     let active = true
-    const today = getJakartaDate()
-
-    getEmployeeSchedules(token, today, today)
-      .then((rows) => {
+    getBranches()
+      .then((branchRows) => {
         if (!active) return
-        setSchedules(rows)
-        setError('')
+        setBranches(branchRows)
+        setBranchError('')
       })
       .catch((requestError) => {
-        if (active) setError(requestError.message)
+        if (active) setBranchError(requestError.message)
       })
       .finally(() => {
-        if (active) setLoading(false)
+        if (active) setBranchesLoading(false)
       })
 
     return () => {
       active = false
     }
-  }, [token, refresh])
+  }, [])
 
-  const handleAttendance = async (schedule, action) => {
-    setBusySchedule(String(schedule.id_jadwal))
+  const selectedDefinition = ATTENDANCE_BRANCHES.find((branch) => branch.slug === branchSlug)
+  const findDatabaseBranch = (definition) => {
+    if (!definition) return null
+    const expected = normalizeBranchName(definition.name)
+    return branches.find((branch) => {
+      const actual = normalizeBranchName(branch.nama_cabang)
+      return Boolean(actual) && (actual === expected || actual.includes(expected) || expected.includes(actual))
+    }) || null
+  }
+  const selectedBranch = findDatabaseBranch(selectedDefinition)
+  const branchId = selectedBranch ? String(selectedBranch.id_cabang) : null
+  const branchStatusMatches = branchId !== null
+    && String(attendanceStatusState.branchId) === branchId
+  const attendanceStatus = branchStatusMatches ? attendanceStatusState.value : null
+  const attendanceStatusError = branchStatusMatches ? attendanceStatusState.error : ''
+  const statusLoading = Boolean(selectedBranch && !branchStatusMatches)
+  const cameraOpen = cameraState.branchSlug === branchSlug
+    ? cameraState.open
+    : Boolean(branchSlug)
+
+  useEffect(() => {
+    let active = true
+    if (!branchId) return undefined
+    getBranchAttendanceStatus(token, branchId)
+      .then((status) => {
+        if (active) {
+          setAttendanceStatusState({
+            branchId,
+            value: status,
+            error: '',
+          })
+        }
+      })
+      .catch((requestError) => {
+        if (active) {
+          setAttendanceStatusState({
+            branchId,
+            value: null,
+            error: requestError.message,
+          })
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [token, branchId, refresh])
+
+  const action = !attendanceStatus?.jam_masuk
+    ? 'masuk'
+    : attendanceStatus?.jam_pulang
+      ? ''
+      : 'pulang'
+
+  const handleAttendance = async (photo) => {
+    if (!selectedBranch || !photo || !action) return false
+    setAttendanceBusy(true)
     setError('')
     setFeedback('')
 
     try {
       const coordinates = await getBrowserCoordinates()
-      const saved = await submitAttendance(token, action, {
-        id_jadwal: schedule.id_jadwal,
+      const saved = await submitBranchAttendance(token, {
+        id_cabang: selectedBranch.id_cabang,
         ...coordinates,
       })
+      setAttendanceStatusState({
+        branchId: String(selectedBranch.id_cabang),
+        value: {
+          ...attendanceStatus,
+          id_absensi: saved.id_absensi,
+          jam_masuk: saved.jam_masuk,
+          jam_pulang: saved.jam_pulang,
+          status_absensi: saved.status_absensi,
+        },
+        error: '',
+      })
       setFeedback(action === 'masuk'
-        ? `Absensi masuk tercatat pada ${formatDateTime(saved.waktu_masuk)}.`
-        : `Absensi pulang tercatat pada ${formatDateTime(saved.waktu_pulang)}.`)
+        ? `Absen masuk berhasil. Lokasi terverifikasi ${saved.distance_meter} meter dari ${saved.nama_cabang}.`
+        : `Absen pulang berhasil. Lokasi terverifikasi ${saved.distance_meter} meter dari ${saved.nama_cabang}.`)
+      setCameraState({ branchSlug, open: false })
       setRefresh((value) => value + 1)
+      return true
     } catch (requestError) {
       setError(requestError.message)
+      return false
     } finally {
-      setBusySchedule('')
+      setAttendanceBusy(false)
     }
   }
 
+  if (!branchSlug) {
+    return (
+      <div className="dashboard-stack">
+        <PageHeading
+          eyebrow="Kehadiran"
+          title="Pilih cabang absensi"
+          detail="Pilih cabang tempat Anda bekerja. Kamera akan terbuka, lalu lokasi diverifikasi setelah foto diambil."
+        />
+        {branchesLoading && <p className="empty-state" role="status">Memuat daftar cabang...</p>}
+        {branchError && <p className="error-box" role="alert">{branchError}</p>}
+        {!branchesLoading && !branchError && (
+          <section className="attendance-branch-grid" aria-label="Pilih cabang">
+            {ATTENDANCE_BRANCHES.map((definition) => {
+              const branch = findDatabaseBranch(definition)
+              const href = `/absensi/${definition.slug}`
+
+              return (
+                <article className="attendance-branch-card" key={definition.slug}>
+                  <Link to={href} className="attendance-branch-select">
+                    <span className="attendance-branch-mark" aria-hidden="true">{definition.name.slice(0, 1)}</span>
+                    <span className="attendance-branch-copy">
+                      <strong>{definition.name}</strong>
+                      <small>{branch
+                        ? branch.status_aktif ? 'Pilih untuk membuka kamera' : 'Cabang sedang tidak aktif'
+                        : 'Cabang belum tersedia di database'}</small>
+                    </span>
+                    <span className="shortcut-arrow" aria-hidden="true">→</span>
+                  </Link>
+                  <a href={definition.mapUrl} target="_blank" rel="noreferrer" className="text-link">
+                    Lihat lokasi
+                  </a>
+                </article>
+              )
+            })}
+          </section>
+        )}
+      </div>
+    )
+  }
+
+  if (!selectedDefinition) {
+    return (
+      <div className="dashboard-stack">
+        <p className="error-box" role="alert">Cabang absensi tidak ditemukan.</p>
+        <Link to="/absensi" className="text-link">Kembali ke pilihan cabang</Link>
+      </div>
+    )
+  }
+
+  const displayTime = (value) => value
+    ? /^\d{2}:\d{2}/.test(value) ? `${value.slice(0, 5)} WIB` : formatDateTime(value)
+    : 'Belum tercatat'
+
   return (
     <div className="dashboard-stack">
-      <PageHeading
-        eyebrow="Kehadiran"
-        title="Absensi masuk dan pulang"
-        detail="Lokasi divalidasi di backend terhadap cabang pada jadwal Anda. Catatan hanya dianggap berhasil setelah tersimpan di database."
-      />
+      <div className="attendance-detail-heading">
+        <Link to="/absensi" className="text-link">← Semua cabang</Link>
+        <PageHeading
+          eyebrow="Kehadiran"
+          title={`Absensi ${selectedDefinition.name}`}
+          detail="Ambil foto. Setelah itu lokasi perangkat diperiksa oleh server; jarak sampai dengan 100 meter diterima."
+        />
+        <a href={selectedDefinition.mapUrl} target="_blank" rel="noreferrer" className="text-link">
+          Buka lokasi di peta
+        </a>
+      </div>
 
       {feedback && <p className="success-box" role="status">{feedback}</p>}
-      {error && <p className="error-box" role="alert">{error}</p>}
+      {(branchError || attendanceStatusError || error) && (
+        <div className="error-box" role="alert">
+          <span>{branchError || attendanceStatusError || error}</span>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              if (!selectedBranch) {
+                setBranchesLoading(true)
+                setBranchError('')
+                getBranches()
+                  .then(setBranches)
+                  .catch((requestError) => setBranchError(requestError.message))
+                  .finally(() => setBranchesLoading(false))
+                return
+              }
+              setError('')
+              setRefresh((value) => value + 1)
+            }}
+          >
+            Muat ulang
+          </button>
+        </div>
+      )}
 
       <section className="panel-block">
-        {loading && <p className="empty-state" role="status">Memuat jadwal hari ini...</p>}
-        {!loading && !error && schedules.length === 0 && (
-          <div className="empty-state">
-            Tidak ada jadwal kerja yang tercatat untuk hari ini. Absensi tidak dapat dilakukan dan status alfa tidak disimpulkan.
-            <Link to="/karyawan/jadwal" className="text-link">Lihat jadwal</Link>
-          </div>
+        {(branchesLoading || statusLoading) && <p className="empty-state" role="status">Memuat status cabang dan absensi...</p>}
+        {!branchesLoading && !branchError && !selectedBranch && (
+          <p className="empty-state">
+            Cabang ini belum terdaftar di database. Hubungi admin agar cabang dan koordinatnya diverifikasi.
+          </p>
         )}
-        {!loading && schedules.map((schedule) => {
-          const hasAttendance = Boolean(schedule.id_absensi)
-          const canClockIn = schedule.status_jadwal === 'terjadwal'
-            && schedule.id_shift
-            && schedule.lokasi_absensi_tersedia
-            && !hasAttendance
-          const canClockOut = schedule.status_jadwal === 'terjadwal'
-            && schedule.id_shift
-            && schedule.lokasi_absensi_tersedia
-            && hasAttendance
-            && !schedule.waktu_pulang
-
-          return (
-            <article className="attendance-card" key={schedule.id_jadwal}>
+        {!branchesLoading && selectedBranch && (
+          <article className="attendance-card">
               <div className="attendance-card-header">
                 <div>
-                  <p className="section-kicker">{schedule.nama_cabang}</p>
-                  <h4>{schedule.nama_shift || 'Shift belum ditentukan'}</h4>
+                  <p className="section-kicker">{selectedBranch.nama_cabang}</p>
+                  <h4>{attendanceStatus?.tanggal ? formatDate(attendanceStatus.tanggal) : formatDate(getJakartaDate())}</h4>
                 </div>
-                <span className="status-pill neutral">{schedule.status_jadwal}</span>
+                <span className={`status-pill ${attendanceStatus?.jam_pulang ? 'success' : 'neutral'}`}>
+                  {attendanceStatus?.jam_pulang ? 'Selesai' : attendanceStatus?.jam_masuk ? 'Sudah masuk' : 'Belum absen'}
+                </span>
               </div>
-              <p className="attendance-schedule">
-                {schedule.jam_masuk && schedule.jam_pulang
-                  ? `${toClock(schedule.jam_masuk)} – ${toClock(schedule.jam_pulang)} WIB`
-                  : 'Waktu shift belum ditentukan'}
-              </p>
-              {hasAttendance && (
-                <div className="attendance-times">
-                  <span>Masuk <strong>{formatDateTime(schedule.waktu_masuk)}</strong></span>
-                  <span>Pulang <strong>{formatDateTime(schedule.waktu_pulang)}</strong></span>
+              <div className="attendance-times">
+                <span>Masuk <strong>{displayTime(attendanceStatus?.jam_masuk)}</strong></span>
+                <span>Pulang <strong>{displayTime(attendanceStatus?.jam_pulang)}</strong></span>
+              </div>
+              {!selectedBranch.status_aktif && (
+                <p className="error-box" role="alert">Cabang sedang tidak aktif untuk absensi.</p>
+              )}
+              {selectedBranch.latitude == null || selectedBranch.longitude == null ? (
+                <p className="error-box" role="alert">Koordinat cabang belum dikonfigurasi. Absensi tidak dapat diproses.</p>
+              ) : attendanceStatus?.jam_pulang ? (
+                <p className="success-box" role="status">Absen masuk dan pulang untuk cabang ini sudah tercatat hari ini.</p>
+              ) : !statusLoading && !error && (
+                <div className="attendance-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!selectedBranch.status_aktif || attendanceBusy || statusLoading}
+                    onClick={() => setCameraState({ branchSlug, open: true })}
+                  >
+                    {attendanceBusy ? 'Memverifikasi lokasi...' : `Buka kamera untuk absen ${action}`}
+                  </button>
                 </div>
               )}
-              {schedule.status_jadwal !== 'terjadwal' && (
-                <p className="helper-text">Absensi hanya tersedia pada jadwal berstatus terjadwal.</p>
-              )}
-              {!schedule.id_shift && (
-                <p className="helper-text">Absensi belum tersedia karena shift belum ditentukan pada jadwal.</p>
-              )}
-              {schedule.id_shift && !schedule.lokasi_absensi_tersedia && (
-                <p className="helper-text">Absensi belum tersedia karena koordinat lokasi cabang belum dikonfigurasi.</p>
-              )}
-              <div className="attendance-actions">
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={!canClockIn || busySchedule === String(schedule.id_jadwal)}
-                  onClick={() => handleAttendance(schedule, 'masuk')}
-                >
-                  {busySchedule === String(schedule.id_jadwal) ? 'Memproses...' : 'Absen masuk'}
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={!canClockOut || busySchedule === String(schedule.id_jadwal)}
-                  onClick={() => handleAttendance(schedule, 'pulang')}
-                >
-                  Absen pulang
-                </button>
-              </div>
-            </article>
-          )
-        })}
+          </article>
+        )}
+      </section>
+      {cameraOpen && selectedBranch?.status_aktif
+        && selectedBranch.latitude != null && selectedBranch.longitude != null
+        && action && !statusLoading && !branchesLoading && !error && !attendanceBusy && (
+        <AttendanceCamera
+          key={`${selectedBranch.id_cabang}-${action}`}
+          action={action}
+          onCancel={() => setCameraState({ branchSlug, open: false })}
+          onCapture={handleAttendance}
+        />
+      )}
+    </div>
+  )
+}
+
+const ATTENDANCE_BRANCHES = [
+  { slug: 'pakuan', name: 'Pakuan', mapUrl: 'https://maps.app.goo.gl/HgCfTyrxSviotwou8' },
+  { slug: 'botani', name: 'Botani', mapUrl: 'https://maps.app.goo.gl/mBiNbWMu7fxWNsif6' },
+  { slug: 'azimar', name: 'Azimar', mapUrl: 'https://maps.app.goo.gl/gmwLppkyDkjugBUC6' },
+  { slug: 'ats', name: 'ATS', mapUrl: 'https://maps.app.goo.gl/kS4fAPy4QyKKYoQv8' },
+  { slug: 'warung-nangka', name: 'Warung Nangka', mapUrl: 'https://maps.app.goo.gl/Yt1nwqQQDotoeMgYA' },
+  { slug: 'ciapus', name: 'Ciapus', mapUrl: 'https://maps.app.goo.gl/SvwythN6nGaRYQj56' },
+]
+
+const normalizeBranchName = (name) => String(name || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, '')
+
+function AttendanceCamera({ action, onCancel, onCapture }) {
+  const [stream, setStream] = useState(null)
+  const [cameraError, setCameraError] = useState('')
+  const [capturing, setCapturing] = useState(false)
+  const [cameraAttempt, setCameraAttempt] = useState(0)
+  const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const cameraAvailable = Boolean(navigator.mediaDevices?.getUserMedia)
+  const displayedCameraError = cameraError || (!cameraAvailable
+    ? 'Kamera tidak tersedia. Gunakan browser dan koneksi aman (HTTPS) yang mendukung kamera.'
+    : '')
+
+  useEffect(() => {
+    let active = true
+    let cameraStream
+
+    if (!cameraAvailable) return undefined
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+      .then((result) => {
+        if (!active) {
+          result.getTracks().forEach((track) => track.stop())
+          return
+        }
+        cameraStream = result
+        setStream(result)
+        if (videoRef.current) {
+          videoRef.current.srcObject = result
+          videoRef.current.play().catch(() => {
+            if (active) setCameraError('Pratinjau kamera tidak dapat dijalankan.')
+          })
+        }
+      })
+      .catch(() => {
+        if (active) setCameraError('Kamera tidak dapat dibuka. Izinkan akses kamera lalu coba lagi.')
+      })
+
+    return () => {
+      active = false
+      cameraStream?.getTracks().forEach((track) => track.stop())
+    }
+  }, [cameraAvailable, cameraAttempt])
+
+  const capturePhoto = () => {
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
+      setCameraError('Kamera belum siap. Tunggu sebentar, lalu coba kembali.')
+      return
+    }
+
+    setCapturing(true)
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d')?.drawImage(video, 0, 0)
+    canvas.toBlob((photo) => {
+      if (!photo) {
+        setCapturing(false)
+        setCameraError('Foto tidak dapat diambil. Coba kembali.')
+        return
+      }
+      Promise.resolve(onCapture(photo))
+        .then((saved) => {
+          if (!saved) setCapturing(false)
+        })
+        .catch(() => {
+          setCapturing(false)
+          setCameraError('Absensi tidak dapat diproses. Periksa lokasi dan coba kembali.')
+        })
+    }, 'image/jpeg', 0.85)
+  }
+
+  return (
+    <div className="camera-backdrop" role="presentation">
+      <section className="camera-dialog" role="dialog" aria-modal="true" aria-labelledby="attendance-camera-title">
+        <div className="camera-dialog-header">
+          <div>
+            <p className="section-kicker">Verifikasi kehadiran</p>
+            <h3 id="attendance-camera-title">Foto sebelum absen {action}</h3>
+          </div>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={capturing}>Batal</button>
+        </div>
+        <video
+          ref={videoRef}
+          className="attendance-camera-video"
+          autoPlay
+          playsInline
+          muted
+          aria-label="Pratinjau kamera"
+        />
+        <canvas ref={canvasRef} className="sr-only" />
+        <p className="helper-text">Foto hanya digunakan untuk membuka langkah kamera dan tidak dikirim atau disimpan. Lokasi akan diverifikasi oleh server setelah foto diambil.</p>
+        {displayedCameraError && <p className="error-box" role="alert">{displayedCameraError}</p>}
+        {displayedCameraError && cameraAvailable && (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              setCameraError('')
+              setCameraAttempt((value) => value + 1)
+            }}
+          >
+            Coba buka kamera lagi
+          </button>
+        )}
+        <div className="attendance-actions">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={capturePhoto}
+            disabled={!stream || capturing || Boolean(displayedCameraError)}
+          >
+            {capturing ? 'Memverifikasi foto dan lokasi...' : 'Ambil foto'}
+          </button>
+        </div>
       </section>
     </div>
   )
@@ -458,6 +682,11 @@ export function EmployeeRequestsPage() {
 
   const submitLeave = async (event) => {
     event.preventDefault()
+    if (leaveForm.tanggal_selesai < leaveForm.tanggal_mulai) {
+      setError('Tanggal selesai tidak boleh sebelum tanggal mulai.')
+      setFeedback('')
+      return
+    }
     setSubmitting('leave')
     setError('')
     setFeedback('')
@@ -506,7 +735,18 @@ export function EmployeeRequestsPage() {
 
       {feedback && <p className="success-box" role="status">{feedback}</p>}
       {error && <p className="error-box" role="alert">{error}</p>}
-      {loadError && <p className="empty-state error" role="alert">{loadError}</p>}
+      {loadError && (
+        <div className="error-box" role="alert">
+          <span>{loadError}</span>
+          <button type="button" className="text-button" onClick={() => {
+            setLoading(true)
+            setLoadError('')
+            setRefresh((value) => value + 1)
+          }}>
+            Muat ulang data
+          </button>
+        </div>
+      )}
       {loading && <p className="empty-state" role="status">Memuat pengajuan...</p>}
 
       <section className="request-form-grid">
@@ -520,24 +760,24 @@ export function EmployeeRequestsPage() {
 
           <div className="form-fields">
             <label>
-              <span>Jenis pengajuan</span>
-              <select name="jenis_pengajuan" value={leaveForm.jenis_pengajuan} onChange={updateLeave}>
+              <span>Jenis pengajuan <span className="required-mark" aria-hidden="true">*</span></span>
+              <select name="jenis_pengajuan" value={leaveForm.jenis_pengajuan} onChange={updateLeave} required>
                 <option value="izin">Izin</option>
                 <option value="sakit">Sakit</option>
               </select>
             </label>
             <div className="form-row">
               <label>
-                <span>Tanggal mulai</span>
+                <span>Tanggal mulai <span className="required-mark" aria-hidden="true">*</span></span>
                 <input type="date" name="tanggal_mulai" value={leaveForm.tanggal_mulai} onChange={updateLeave} required />
               </label>
               <label>
-                <span>Tanggal selesai</span>
+                <span>Tanggal selesai <span className="required-mark" aria-hidden="true">*</span></span>
                 <input type="date" name="tanggal_selesai" value={leaveForm.tanggal_selesai} onChange={updateLeave} required />
               </label>
             </div>
             <label>
-              <span>Alasan</span>
+              <span>Alasan <span className="required-mark" aria-hidden="true">*</span></span>
               <textarea name="alasan" value={leaveForm.alasan} onChange={updateLeave} minLength="5" maxLength="2000" rows="3" required />
             </label>
             <button className="primary-button" type="submit" disabled={submitting !== ''}>
@@ -556,8 +796,8 @@ export function EmployeeRequestsPage() {
 
           <div className="form-fields">
             <label>
-              <span>Jenis perubahan</span>
-              <select name="jenis_perubahan" value={changeForm.jenis_perubahan} onChange={updateChange}>
+              <span>Jenis perubahan <span className="required-mark" aria-hidden="true">*</span></span>
+              <select name="jenis_perubahan" value={changeForm.jenis_perubahan} onChange={updateChange} required>
                 <option value="ubah_jadwal">Ubah jadwal</option>
                 <option value="tukar_shift">Tukar shift</option>
                 <option value="tukar_libur">Tukar libur</option>
@@ -565,7 +805,7 @@ export function EmployeeRequestsPage() {
               </select>
             </label>
             <label>
-              <span>Tanggal jadwal baru</span>
+              <span>Tanggal jadwal baru <span className="required-mark" aria-hidden="true">*</span></span>
               <input type="date" name="tanggal_jadwal_baru" value={changeForm.tanggal_jadwal_baru} onChange={updateChange} required />
             </label>
             <label>
@@ -602,7 +842,7 @@ export function EmployeeRequestsPage() {
               </label>
             </div>
             <label>
-              <span>Alasan</span>
+              <span>Alasan <span className="required-mark" aria-hidden="true">*</span></span>
               <textarea name="alasan" value={changeForm.alasan} onChange={updateChange} minLength="5" maxLength="2000" rows="3" required />
             </label>
             <button className="primary-button" type="submit" disabled={submitting !== ''}>

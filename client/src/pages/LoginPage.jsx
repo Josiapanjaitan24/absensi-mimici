@@ -1,17 +1,16 @@
 import { useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/auth'
 
-export function LoginPage() {
+export function LoginPage({ audience = null }) {
   const navigate = useNavigate()
-  const location = useLocation()
-  const { login, user } = useAuth()
+  const { login, logout, user } = useAuth()
   const [formData, setFormData] = useState({ nama_pengguna: '', kata_sandi: '' })
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (user) {
-    const redirectPath = user.peran === 'admin' ? '/admin' : '/karyawan'
+    const redirectPath = user.peran === 'admin' ? '/admin' : '/'
     return <Navigate to={redirectPath} replace />
   }
 
@@ -27,8 +26,14 @@ export function LoginPage() {
 
     try {
       const authenticatedUser = await login(formData)
-      const redirectTo = location.state?.from || (authenticatedUser.peran === 'admin' ? '/admin' : '/karyawan')
-      navigate(redirectTo, { replace: true })
+      if (audience && authenticatedUser.peran !== audience) {
+        logout()
+        setError(audience === 'admin'
+          ? 'Akun ini bukan akun admin. Gunakan akses login karyawan.'
+          : 'Akun ini bukan akun karyawan. Gunakan halaman login admin.')
+        return
+      }
+      navigate(authenticatedUser.peran === 'admin' ? '/admin' : '/', { replace: true })
     } catch (loginError) {
       setError(loginError.message || 'Login gagal. Silakan coba lagi.')
     } finally {
@@ -43,12 +48,10 @@ export function LoginPage() {
           <p className="eyebrow">Mimici</p>
           <h1>Selamat datang kembali</h1>
           <p>
-            Masuk untuk mengakses dashboard karyawan atau admin sesuai peran Anda.
+            {audience === 'admin'
+              ? 'Masuk dengan akun admin untuk mengelola operasional.'
+              : 'Masuk dengan akun karyawan untuk melihat jadwal dan absensi Anda.'}
           </p>
-          <div className="auth-info-box">
-            <strong>Autentikasi aktif</strong>
-            <span>Backend memvalidasi token JWT untuk setiap permintaan yang membutuhkan akses.</span>
-          </div>
         </div>
 
         <div className="auth-panel form-panel">

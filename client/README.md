@@ -1,16 +1,18 @@
-# React + Vite
+# Absensi Mimici Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+## Menjalankan lokal
 
-Currently, two official plugins are available:
+Jalankan backend dari `server` dengan `npm run dev`, lalu frontend dari `client` dengan `npm run dev`. Vite meneruskan request `/api` ke backend lokal pada port `5001`.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+API client menggunakan path relatif `/api` secara default. Jika backend produksi berada pada origin/path API berbeda, set `VITE_API_BASE_URL` saat build, misalnya `https://api.example.invalid/api`; jangan memasukkan credential ke variabel frontend.
 
-## React Compiler
+## URL aplikasi
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Karyawan: `/`, `/absensi`, `/riwayat`, `/pengajuan`, `/profil`.
+- Admin: `/admin`, `/admin/cabang`, `/admin/rekap-bulanan`, `/admin/pengajuan`.
 
-## Expanding the Oxlint configuration
+Pada layar ponsel, navigasi sidebar diganti tombol menu hamburger di bagian atas; dropdown berisi semua menu sesuai peran dan menutup setelah pilihan atau tombol Escape.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Untuk deployment Vercel, atur Root Directory ke `client`. `vercel.json` mem-rewrite route aplikasi ke SPA entry point tanpa menangkap path `/api`. Agar satu domain melayani API di Vercel, deployment backend/reverse proxy perlu menyediakan `/api/*` pada domain yang sama; jika backend berbeda origin, set `VITE_API_BASE_URL` saat build. Konfigurasi ini tidak mengarang host backend production.
+
+Menu rekap bulanan hanya terlihat untuk admin. Halaman mengambil pratinjau seluruh cabang dari API admin terautentikasi dan mengunduh satu workbook `.xlsx` per bulan. Rekap memuat absensi aktual dan satu catatan per hari untuk setiap izin/sakit yang disetujui, termasuk nama, tanggal, status, serta alasan. Pada halaman pengajuan admin, **Lihat** membuka detail permohonan izin/sakit dan perubahan jadwal; admin dapat memberi catatan serta menyetujui atau menolak permohonan yang masih menunggu. Keputusan perubahan jadwal tidak mengubah jadwal kerja secara otomatis.

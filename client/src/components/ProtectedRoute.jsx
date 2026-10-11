@@ -10,11 +10,11 @@ export function ProtectedRoute({ children, allowedRoles }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+    return <Navigate to={allowedRoles?.includes('admin') ? '/admin' : '/'} replace state={{ from: location.pathname }} />
   }
 
   if (allowedRoles && !allowedRoles.includes(user.peran)) {
-    return <Navigate to="/" replace />
+    return <Navigate to={user.peran === 'admin' ? '/admin' : '/'} replace />
   }
 
   return children

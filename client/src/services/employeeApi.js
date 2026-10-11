@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:5001/api'
+import { API_BASE_URL } from './apiConfig'
 
 async function request(path, token, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -44,6 +44,17 @@ export function getAttendanceHistory(token, mulai, selesai) {
 
 export function submitAttendance(token, action, payload) {
   return request(`/karyawan/absensi/${action}`, token, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getBranchAttendanceStatus(token, branchId) {
+  return request(`/karyawan/absensi/cabang/${encodeURIComponent(branchId)}`, token)
+}
+
+export function submitBranchAttendance(token, payload) {
+  return request('/karyawan/absensi/cabang', token, {
     method: 'POST',
     body: JSON.stringify(payload),
   })

@@ -84,6 +84,43 @@ const validateAttendanceRequest = (req, res, next) => {
   return next();
 };
 
+const validateBranchAttendanceRequest = (req, res, next) => {
+  const { id_cabang, latitude, longitude } = req.body || {};
+
+  if (!isPositiveId(id_cabang)) {
+    return buildError(res, 400, 'ID cabang wajib diisi dengan nilai positif.');
+  }
+
+  if (
+    typeof latitude !== 'number'
+    || !Number.isFinite(latitude)
+    || latitude < -90
+    || latitude > 90
+    || typeof longitude !== 'number'
+    || !Number.isFinite(longitude)
+    || longitude < -180
+    || longitude > 180
+  ) {
+    return buildError(res, 400, 'Koordinat lokasi tidak valid.');
+  }
+
+  req.validatedBranchAttendance = {
+    id_cabang: String(id_cabang),
+    latitude,
+    longitude,
+  };
+  return next();
+};
+
+const validateAttendanceBranchId = (req, res, next) => {
+  if (!isPositiveId(req.params.id)) {
+    return buildError(res, 400, 'ID cabang wajib berupa bilangan positif.');
+  }
+
+  req.validatedAttendanceBranchId = String(req.params.id);
+  return next();
+};
+
 const validateLeaveRequest = (req, res, next) => {
   const { tanggal_mulai, tanggal_selesai, jenis_pengajuan, alasan } = req.body || {};
 
@@ -154,6 +191,8 @@ module.exports = {
   currentJakartaDate,
   validateDateRange,
   validateAttendanceRequest,
+  validateBranchAttendanceRequest,
+  validateAttendanceBranchId,
   validateLeaveRequest,
   validateScheduleChangeRequest,
 };

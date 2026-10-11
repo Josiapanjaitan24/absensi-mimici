@@ -8,13 +8,10 @@ const getCabang = async (req, res, next) => {
         SELECT
           id_cabang,
           nama_cabang,
-          slug,
           latitude,
           longitude,
-          radius_meter,
           status_aktif
         FROM cabang
-        WHERE status_aktif = TRUE
         ORDER BY id_cabang ASC
       `
     );

@@ -1,31 +1,40 @@
 import { useEffect, useState } from 'react'
+import { API_BASE_URL } from '../services/apiConfig'
 
 export function HomePage() {
   const [cabang, setCabang] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [refresh, setRefresh] = useState(0)
 
   useEffect(() => {
+    let active = true
     const ambilDataCabang = async () => {
       try {
-        const response = await fetch('http://localhost:5001/api/cabang')
+        const response = await fetch(`${API_BASE_URL}/cabang`)
         const hasil = await response.json()
 
         if (!response.ok || !hasil.success) {
           throw new Error('Gagal mengambil data cabang.')
         }
 
-        setCabang(hasil.data ?? [])
+        if (active) {
+          setCabang(hasil.data ?? [])
+          setError('')
+        }
       } catch (err) {
         console.error('Kesalahan mengambil data cabang:', err)
-        setError('Data cabang gagal dimuat. Pastikan backend berjalan.')
+        if (active) setError('Data cabang gagal dimuat. Pastikan koneksi layanan tersedia.')
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     }
 
     ambilDataCabang()
-  }, [])
+    return () => {
+      active = false
+    }
+  }, [refresh])
 
   return (
     <>
@@ -56,7 +65,18 @@ export function HomePage() {
 
         {loading && <p className="empty-state">Memuat data cabang...</p>}
 
-        {error && <p className="empty-state error">{error}</p>}
+        {error && (
+          <div className="error-box" role="alert">
+            <span>{error}</span>
+            <button type="button" className="text-button" onClick={() => {
+              setLoading(true)
+              setError('')
+              setRefresh((value) => value + 1)
+            }}>
+              Coba lagi
+            </button>
+          </div>
+        )}
 
         {!loading && !error && (
           cabang.length === 0

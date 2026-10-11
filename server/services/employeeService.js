@@ -66,24 +66,22 @@ const getAttendanceHistory = async (id_karyawan, { mulai, selesai }) => {
       SELECT
         a.id_absensi,
         a.id_jadwal,
-        j.tanggal_kerja,
+        a.tanggal AS tanggal_kerja,
         c.nama_cabang,
-        s.nama_shift,
-        s.jam_masuk::text AS jam_masuk_terjadwal,
-        s.jam_pulang::text AS jam_pulang_terjadwal,
-        a.waktu_masuk,
-        a.waktu_pulang,
-        a.status_kehadiran,
-        a.menit_terlambat,
-        a.menit_terlambat_diluar_toleransi,
-        a.catatan
+        NULL::text AS nama_shift,
+        NULL::text AS jam_masuk_terjadwal,
+        NULL::text AS jam_pulang_terjadwal,
+        a.jam_masuk::text AS waktu_masuk,
+        a.jam_pulang::text AS waktu_pulang,
+        a.status_absensi AS status_kehadiran,
+        0 AS menit_terlambat,
+        0 AS menit_terlambat_diluar_toleransi,
+        NULL::text AS catatan
       FROM absensi a
-      INNER JOIN jadwal_kerja j ON j.id_jadwal = a.id_jadwal
-      INNER JOIN cabang c ON c.id_cabang = j.id_cabang
-      LEFT JOIN shift_kerja s ON s.id_shift = j.id_shift
-      WHERE j.id_karyawan = $1
-        AND j.tanggal_kerja BETWEEN $2::date AND $3::date
-      ORDER BY j.tanggal_kerja DESC, a.id_absensi DESC
+      INNER JOIN cabang c ON c.id_cabang = a.id_cabang
+      WHERE a.id_karyawan = $1
+        AND a.tanggal BETWEEN $2::date AND $3::date
+      ORDER BY a.tanggal DESC, a.id_absensi DESC
     `,
     [id_karyawan, mulai, selesai]
   );
@@ -281,6 +279,14 @@ const haversineDistanceMeters = (latitude1, longitude1, latitude2, longitude2) =
   return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
+const isWithinAttendanceRadius = (distanceMeters, configuredRadius) => {
+  const radius = Number(configuredRadius);
+  const effectiveRadius = Number.isFinite(radius) && radius > 0
+    ? Math.min(radius, 100)
+    : 100;
+  return Number.isFinite(distanceMeters) && distanceMeters <= effectiveRadius;
+};
+
 const getShiftStartTimestamp = (date, time) => {
   const [year, month, day] = date.split('-').map(Number);
   const [hour, minute, second = '0'] = time.split(':');
@@ -363,8 +369,8 @@ const recordAttendance = async (id_karyawan, data, action) => {
       Number(schedule.longitude_cabang)
     );
 
-    if (distance > Number(schedule.radius_meter)) {
-      fail(403, 'Lokasi perangkat berada di luar radius absensi cabang.');
+    if (!isWithinAttendanceRadius(distance, schedule.radius_meter)) {
+      fail(403, 'Lokasi perangkat berada di luar radius maksimal 100 meter dari cabang.');
     }
 
     const existingResult = await client.query(
@@ -480,6 +486,174 @@ const recordAttendance = async (id_karyawan, data, action) => {
   }
 };
 
+const getBranchAttendanceStatus = async (id_karyawan, id_cabang, dbPool = pool) => {
+  const result = await dbPool.query(
+    `
+      SELECT
+        c.id_cabang,
+        c.nama_cabang,
+        c.latitude,
+        c.longitude,
+        c.status_aktif AS cabang_aktif,
+        timezone('Asia/Jakarta', CURRENT_TIMESTAMP)::date::text AS tanggal,
+        a.id_absensi,
+        a.jam_masuk::text AS jam_masuk,
+        a.jam_pulang::text AS jam_pulang,
+        a.status_absensi
+      FROM cabang c
+      LEFT JOIN absensi a
+        ON a.id_cabang = c.id_cabang
+       AND a.id_karyawan = $1
+       AND a.tanggal = timezone('Asia/Jakarta', CURRENT_TIMESTAMP)::date
+      WHERE c.id_cabang = $2
+    `,
+    [id_karyawan, id_cabang]
+  );
+
+  if (result.rowCount === 0) {
+    fail(404, 'Cabang tidak ditemukan.');
+  }
+
+  return result.rows[0];
+};
+
+const recordBranchAttendance = async (id_karyawan, data, dbPool = pool) => {
+  const client = await dbPool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const branchResult = await client.query(
+      `
+        SELECT
+          id_cabang,
+          nama_cabang,
+          latitude,
+          longitude,
+          status_aktif,
+          timezone('Asia/Jakarta', CURRENT_TIMESTAMP)::date::text AS tanggal
+        FROM cabang
+        WHERE id_cabang = $1
+        FOR SHARE
+      `,
+      [data.id_cabang]
+    );
+    const branch = branchResult.rows[0];
+
+    if (!branch) {
+      fail(404, 'Cabang tidak ditemukan.');
+    }
+    if (!branch.status_aktif) {
+      fail(409, 'Cabang sedang tidak aktif untuk absensi.');
+    }
+    if (branch.latitude === null || branch.longitude === null) {
+      fail(409, 'Koordinat cabang belum dikonfigurasi. Hubungi admin.');
+    }
+
+    const distance = haversineDistanceMeters(
+      data.latitude,
+      data.longitude,
+      Number(branch.latitude),
+      Number(branch.longitude)
+    );
+    if (!isWithinAttendanceRadius(distance, 100)) {
+      fail(403, `Absensi ditolak: lokasi berjarak ${Math.round(distance)} meter, melebihi radius 100 meter.`);
+    }
+
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+      [`attendance:${id_karyawan}`, `${data.id_cabang}:${branch.tanggal}`]
+    );
+
+    const existingResult = await client.query(
+      `
+        SELECT id_absensi, jam_masuk::text AS jam_masuk, jam_pulang::text AS jam_pulang
+        FROM absensi
+        WHERE id_karyawan = $1
+          AND id_cabang = $2
+          AND tanggal = $3::date
+        ORDER BY id_absensi DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [id_karyawan, data.id_cabang, branch.tanggal]
+    );
+    const existing = existingResult.rows[0];
+    let attendance;
+    let action;
+
+    if (!existing || !existing.jam_masuk) {
+      action = 'masuk';
+      const result = await client.query(
+        `
+          INSERT INTO absensi (
+            id_karyawan,
+            id_jadwal,
+            id_cabang,
+            tanggal,
+            jam_masuk,
+            status_absensi,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1,
+            NULL,
+            $2,
+            $3::date,
+            CURRENT_TIMESTAMP,
+            'hadir',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP
+          )
+          RETURNING
+            id_absensi,
+            id_cabang,
+            tanggal::text AS tanggal,
+            jam_masuk::text AS jam_masuk,
+            jam_pulang::text AS jam_pulang,
+            status_absensi
+        `,
+        [id_karyawan, data.id_cabang, branch.tanggal]
+      );
+      attendance = result.rows[0];
+    } else if (!existing.jam_pulang) {
+      action = 'pulang';
+      const result = await client.query(
+        `
+          UPDATE absensi
+          SET jam_pulang = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id_absensi = $1
+          RETURNING
+            id_absensi,
+            id_cabang,
+            tanggal::text AS tanggal,
+            jam_masuk::text AS jam_masuk,
+            jam_pulang::text AS jam_pulang,
+            status_absensi
+        `,
+        [existing.id_absensi]
+      );
+      attendance = result.rows[0];
+    } else {
+      fail(409, 'Absensi masuk dan pulang untuk cabang ini sudah tercatat hari ini.');
+    }
+
+    await client.query('COMMIT');
+    return {
+      ...attendance,
+      nama_cabang: branch.nama_cabang,
+      action,
+      distance_meter: Math.round(distance),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getSchedule,
   getActiveShifts,
@@ -489,7 +663,10 @@ module.exports = {
   getScheduleChangeRequests,
   createScheduleChangeRequest,
   recordAttendance,
+  getBranchAttendanceStatus,
+  recordBranchAttendance,
   calculateTardiness,
   haversineDistanceMeters,
+  isWithinAttendanceRadius,
   getShiftStartTimestamp,
 };

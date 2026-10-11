@@ -28,6 +28,33 @@ const getAttendanceHistory = async (req, res, next) => {
   }
 };
 
+const getBranchAttendanceStatus = async (req, res, next) => {
+  try {
+    const result = await employeeService.getBranchAttendanceStatus(
+      req.user.id_karyawan,
+      req.validatedAttendanceBranchId
+    );
+    return buildSuccess(res, result, 200, 'Status absensi cabang berhasil diambil.');
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const recordBranchAttendance = async (req, res, next) => {
+  try {
+    const attendance = await employeeService.recordBranchAttendance(
+      req.user.id_karyawan,
+      req.validatedBranchAttendance
+    );
+    const message = attendance.action === 'masuk'
+      ? 'Absensi masuk berhasil dicatat.'
+      : 'Absensi pulang berhasil dicatat.';
+    return buildSuccess(res, attendance, attendance.action === 'masuk' ? 201 : 200, message);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const clockIn = async (req, res, next) => {
   try {
     const attendance = await employeeService.recordAttendance(
@@ -97,6 +124,8 @@ module.exports = {
   getSchedule,
   getActiveShifts,
   getAttendanceHistory,
+  getBranchAttendanceStatus,
+  recordBranchAttendance,
   clockIn,
   clockOut,
   getLeaveRequests,

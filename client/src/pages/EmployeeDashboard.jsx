@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/auth'
-import { getEmployeeSchedules } from '../services/employeeApi'
+import { getAttendanceHistory } from '../services/employeeApi'
 
 const getJakartaDate = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Jakarta',
@@ -10,23 +10,34 @@ const getJakartaDate = () => new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 }).format(new Date())
 
-const formatDate = (value) => new Intl.DateTimeFormat('id-ID', {
-  dateStyle: 'full',
+const formatDate = (value, style = 'full') => new Intl.DateTimeFormat('id-ID', {
+  dateStyle: style,
   timeZone: 'Asia/Jakarta',
 }).format(new Date(`${value}T12:00:00+07:00`))
 
+const formatDateTime = (value) => value
+  ? new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Jakarta',
+  }).format(new Date(value))
+  : 'Belum tercatat'
+
 export function EmployeeDashboard() {
   const { token, user } = useAuth()
-  const [schedules, setSchedules] = useState([])
+  const [recentRecords, setRecentRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
+  const [refreshKey, setRefreshKey] = useState(0)
+  const today = getJakartaDate()
   useEffect(() => {
     let active = true
 
-    getEmployeeSchedules(token, getJakartaDate(), getJakartaDate())
-      .then((rows) => {
-        if (active) setSchedules(rows)
+    getAttendanceHistory(token)
+      .then((history) => {
+        if (!active) return
+        setRecentRecords(history.slice(0, 3))
+        setError('')
       })
       .catch((requestError) => {
         if (active) setError(requestError.message)
@@ -38,64 +49,73 @@ export function EmployeeDashboard() {
     return () => {
       active = false
     }
-  }, [token])
+  }, [token, refreshKey])
 
   return (
     <div className="dashboard-stack">
-      <section className="hero-panel employee-hero">
+      <section className="employee-welcome">
         <div>
-          <p className="eyebrow">AREA KARYAWAN</p>
-          <h3>Halo, <span>{user?.nama_lengkap || user?.nama_pengguna}</span></h3>
-          <p>{formatDate(getJakartaDate())}. Informasi di halaman ini berasal dari akun dan jadwal Anda.</p>
+          <p className="section-kicker">Area karyawan</p>
+          <h3>Halo, {user?.nama_lengkap || user?.nama_pengguna}</h3>
+          <p>{formatDate(today)} · Pilih cabang untuk mencatat kehadiran Anda</p>
         </div>
-        <Link className="primary-button" to="/karyawan/absensi">Buka absensi</Link>
+        <Link className="primary-button" to="/absensi">Mulai absensi</Link>
       </section>
+
+      {error && (
+        <div className="error-box" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              setLoading(true)
+              setError('')
+              setRefreshKey((value) => value + 1)
+            }}
+          >
+            Coba lagi
+          </button>
+        </div>
+      )}
 
       <section className="panel-block">
         <div className="panel-header">
           <div>
-            <p className="section-kicker">Hari ini</p>
-            <h3>Jadwal kerja saya</h3>
+            <p className="section-kicker">Terbaru</p>
+            <h3>Riwayat absensi</h3>
           </div>
-          <Link className="text-link" to="/karyawan/jadwal">Lihat jadwal</Link>
+          <Link className="text-link" to="/riwayat">Lihat semua</Link>
         </div>
-
-        {loading && <p className="empty-state" role="status">Memuat jadwal kerja...</p>}
-        {error && <p className="empty-state error" role="alert">{error}</p>}
-        {!loading && !error && schedules.length === 0 && (
-          <div className="empty-state">
-            Belum ada jadwal kerja yang tercatat untuk hari ini. Status alfa tidak disimpulkan dari jadwal yang kosong.
-          </div>
+        {loading && <p className="empty-state" role="status">Memuat riwayat absensi...</p>}
+        {!loading && !error && recentRecords.length === 0 && (
+          <p className="empty-state">Belum ada catatan absensi tersimpan.</p>
         )}
-        {!loading && !error && schedules.length > 0 && (
+        {!loading && !error && recentRecords.length > 0 && (
           <div className="employee-record-list">
-            {schedules.map((schedule) => (
-              <article className="employee-record" key={schedule.id_jadwal}>
-                <div className="record-mark" aria-hidden="true">J</div>
+            {recentRecords.map((record) => (
+              <article className="employee-record" key={record.id_absensi}>
                 <div className="record-main">
-                  <strong>{schedule.nama_shift || 'Shift belum ditentukan'}</strong>
-                  <span>{schedule.nama_cabang} · {schedule.status_jadwal}</span>
+                  <strong>{formatDate(record.tanggal_kerja, 'medium')}</strong>
+                  <span>{record.nama_cabang} · {record.nama_shift || 'Shift belum ditentukan'}</span>
                 </div>
-                <span className="record-time">
-                  {schedule.jam_masuk && schedule.jam_pulang
-                    ? `${schedule.jam_masuk.slice(0, 5)} – ${schedule.jam_pulang.slice(0, 5)}`
-                    : 'Jam belum ditentukan'}
-                </span>
+                <div className="record-side">
+                  <span className="record-time">{formatDateTime(record.waktu_masuk)}</span>
+                  <span className="status-pill neutral">{record.status_kehadiran}</span>
+                </div>
               </article>
             ))}
           </div>
         )}
       </section>
 
-      <section className="employee-shortcuts">
-        <Link to="/karyawan/riwayat" className="shortcut-card">
-          <span className="shortcut-icon" aria-hidden="true">↺</span>
-          <span><strong>Riwayat absensi</strong><small>Lihat catatan kehadiran tersimpan</small></span>
+      <section className="employee-shortcuts" aria-label="Menu karyawan">
+        <Link to="/absensi" className="shortcut-card">
+          <span><strong>Absensi cabang</strong><small>Pilih lokasi untuk mencatat kehadiran</small></span>
           <span className="shortcut-arrow" aria-hidden="true">→</span>
         </Link>
-        <Link to="/karyawan/pengajuan" className="shortcut-card">
-          <span className="shortcut-icon" aria-hidden="true">＋</span>
-          <span><strong>Pengajuan</strong><small>Izin, sakit, atau perubahan jadwal</small></span>
+        <Link to="/pengajuan" className="shortcut-card">
+          <span><strong>Pengajuan</strong><small>Izin, sakit, dan perubahan jadwal</small></span>
           <span className="shortcut-arrow" aria-hidden="true">→</span>
         </Link>
       </section>

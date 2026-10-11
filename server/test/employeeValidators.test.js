@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const {
   validateDateRange,
   validateAttendanceRequest,
+  validateBranchAttendanceRequest,
+  validateAttendanceBranchId,
   validateLeaveRequest,
   validateScheduleChangeRequest,
 } = require('../middleware/employeeValidators');
@@ -10,6 +12,7 @@ const {
   calculateTardiness,
   getShiftStartTimestamp,
   haversineDistanceMeters,
+  isWithinAttendanceRadius,
 } = require('../services/employeeService');
 
 const createResponse = () => ({
@@ -68,6 +71,36 @@ test('attendance validation requires positive schedule id and bounded numeric co
     id_jadwal: '5',
     latitude: -6.25,
     longitude: 106.8,
+  });
+
+  test('branch attendance validation requires a branch and valid GPS coordinates', () => {
+    const valid = invoke(validateBranchAttendanceRequest, {
+      body: { id_cabang: '6', latitude: -6.25, longitude: 106.8 },
+    });
+    assert.equal(valid.nextCalled, true);
+    assert.deepEqual(valid.req.validatedBranchAttendance, {
+      id_cabang: '6',
+      latitude: -6.25,
+      longitude: 106.8,
+    });
+
+    for (const body of [
+      { id_cabang: '0', latitude: 0, longitude: 0 },
+      { id_cabang: '1', latitude: -91, longitude: 0 },
+      { id_cabang: '1', latitude: 0, longitude: 181 },
+      { id_cabang: '1', latitude: '0', longitude: 0 },
+    ]) {
+      const result = invoke(validateBranchAttendanceRequest, { body });
+      assert.equal(result.nextCalled, false);
+      assert.equal(result.res.statusCode, 400);
+    }
+
+    const validId = invoke(validateAttendanceBranchId, { params: { id: '2' } });
+    assert.equal(validId.nextCalled, true);
+    assert.equal(validId.req.validatedAttendanceBranchId, '2');
+    const invalidId = invoke(validateAttendanceBranchId, { params: { id: '0' } });
+    assert.equal(invalidId.nextCalled, false);
+    assert.equal(invalidId.res.statusCode, 400);
   });
 
   const invalid = invoke(validateAttendanceRequest, {
@@ -147,4 +180,12 @@ test('attendance keeps the configured ten-minute tolerance without generating al
 
 test('GPS distance calculation returns zero at the branch coordinate', () => {
   assert.equal(haversineDistanceMeters(-6.2, 106.8, -6.2, 106.8), 0);
+});
+
+test('attendance GPS accepts at most 100 meters and never exceeds a stricter branch radius', () => {
+  assert.equal(isWithinAttendanceRadius(100, 250), true);
+  assert.equal(isWithinAttendanceRadius(100.01, 250), false);
+  assert.equal(isWithinAttendanceRadius(80, 80), true);
+  assert.equal(isWithinAttendanceRadius(80.01, 80), false);
+  assert.equal(isWithinAttendanceRadius(100, null), true);
 });

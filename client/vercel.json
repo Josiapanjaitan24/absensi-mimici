@@ -1,0 +1,15 @@
+{
+  "rewrites": [
+    { "source": "/jadwal", "destination": "/index.html" },
+    { "source": "/absensi", "destination": "/index.html" },
+    { "source": "/riwayat", "destination": "/index.html" },
+    { "source": "/pengajuan", "destination": "/index.html" },
+    { "source": "/profil", "destination": "/index.html" },
+    { "source": "/login", "destination": "/index.html" },
+    { "source": "/admin", "destination": "/index.html" },
+    { "source": "/admin/:path*", "destination": "/index.html" },
+    { "source": "/karyawan", "destination": "/index.html" },
+    { "source": "/karyawan/:path*", "destination": "/index.html" },
+    { "source": "/404", "destination": "/index.html" }
+  ]
+}

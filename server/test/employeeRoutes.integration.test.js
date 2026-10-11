@@ -50,6 +50,8 @@ test('employee endpoints reject requests without an authenticated identity', asy
     ['GET', '/api/karyawan/shift'],
     ['GET', '/api/karyawan/jadwal'],
     ['GET', '/api/karyawan/absensi'],
+    ['GET', '/api/karyawan/absensi/cabang/1'],
+    ['POST', '/api/karyawan/absensi/cabang'],
     ['POST', '/api/karyawan/absensi/masuk'],
     ['POST', '/api/karyawan/absensi/pulang'],
     ['GET', '/api/karyawan/pengajuan-izin'],
@@ -63,6 +65,30 @@ test('employee endpoints reject requests without an authenticated identity', asy
       method,
       headers: method === 'POST' ? { 'Content-Type': 'application/json' } : {},
       body: method === 'POST' ? '{}' : undefined,
+    });
+    assert.equal(response.status, 401, `${method} ${path} must require auth`);
+    const body = await response.json();
+    assert.equal(body.success, false);
+    assert.equal(body.message, 'Token otorisasi diperlukan.');
+  }
+});
+
+test('admin endpoints reject requests without an authenticated identity', async () => {
+  const endpoints = [
+    ['GET', '/api/admin/dashboard'],
+    ['GET', '/api/admin/cabang'],
+    ['GET', '/api/admin/pengajuan'],
+    ['PATCH', '/api/admin/cabang/1'],
+    ['PATCH', '/api/admin/pengajuan/izin/1'],
+    ['GET', '/api/admin/rekap-bulanan?bulan=10&tahun=2026'],
+    ['GET', '/api/admin/rekap-bulanan.xlsx?bulan=10&tahun=2026'],
+  ];
+
+  for (const [method, path] of endpoints) {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: method === 'PATCH' ? { 'Content-Type': 'application/json' } : {},
+      body: method === 'PATCH' ? JSON.stringify({ status_aktif: false }) : undefined,
     });
     assert.equal(response.status, 401, `${method} ${path} must require auth`);
     const body = await response.json();
