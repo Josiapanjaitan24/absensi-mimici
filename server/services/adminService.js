@@ -85,9 +85,9 @@ const getDashboardSummary = async () => {
         (
           SELECT COUNT(*)::int
           FROM absensi a
-          INNER JOIN jadwal_kerja j ON j.id_jadwal = a.id_jadwal
-          WHERE j.tanggal_kerja = timezone('Asia/Jakarta', CURRENT_TIMESTAMP)::date
-            AND a.waktu_masuk IS NOT NULL
+          LEFT JOIN jadwal_kerja j ON j.id_jadwal = a.id_jadwal
+          WHERE COALESCE(j.tanggal_kerja, a.tanggal) = timezone('Asia/Jakarta', CURRENT_TIMESTAMP)::date
+            AND (a.waktu_masuk IS NOT NULL OR a.jam_masuk IS NOT NULL)
         ) AS absensi_masuk_hari_ini,
         (
           (SELECT COUNT(*) FROM pengajuan_izin WHERE status_pengajuan = 'menunggu')

@@ -13,30 +13,7 @@ import {
   getScheduleChangeRequests,
   submitBranchAttendance,
 } from '../services/employeeApi'
-
-const getJakartaDate = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Jakarta',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-}).format(new Date())
-
-const formatDate = (value) => value
-  ? new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'medium',
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date(`${String(value).slice(0, 10)}T12:00:00+07:00`))
-  : '—'
-
-const formatDateTime = (value) => value
-  ? /^\d{2}:\d{2}/.test(String(value))
-    ? `${String(value).slice(0, 5)} WIB`
-    : new Intl.DateTimeFormat('id-ID', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZone: 'Asia/Jakarta',
-    }).format(new Date(value))
-  : '—'
+import { formatDate, formatDateTime, getJakartaDate } from '../utils/dateFormatting'
 
 const toClock = (value) => value ? value.slice(0, 5) : '—'
 

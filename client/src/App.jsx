@@ -26,8 +26,8 @@ class PageErrorBoundary extends Component {
     return { hasError: true }
   }
 
-  componentDidCatch(error) {
-    console.error('Halaman gagal dirender:', error)
+  componentDidCatch(error, info) {
+    console.error('Halaman gagal dirender:', error, info.componentStack)
   }
 
   render() {
@@ -47,6 +47,7 @@ class PageErrorBoundary extends Component {
 }
 
 function RoleArea({ role }) {
+  const location = useLocation()
   const { user, loading } = useAuth()
 
   if (loading) {
@@ -62,11 +63,13 @@ function RoleArea({ role }) {
   }
 
   return (
-    <AppShell>
-      <PageErrorBoundary>
-        <Outlet />
-      </PageErrorBoundary>
-    </AppShell>
+    <PageErrorBoundary key={location.pathname}>
+      <AppShell>
+        <PageErrorBoundary key={location.pathname}>
+          <Outlet />
+        </PageErrorBoundary>
+      </AppShell>
+    </PageErrorBoundary>
   )
 }
 

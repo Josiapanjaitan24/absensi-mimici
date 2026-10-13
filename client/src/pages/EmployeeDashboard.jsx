@@ -2,26 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/auth'
 import { getAttendanceHistory } from '../services/employeeApi'
-
-const getJakartaDate = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Jakarta',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-}).format(new Date())
-
-const formatDate = (value, style = 'full') => new Intl.DateTimeFormat('id-ID', {
-  dateStyle: style,
-  timeZone: 'Asia/Jakarta',
-}).format(new Date(`${value}T12:00:00+07:00`))
-
-const formatDateTime = (value) => value
-  ? new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Jakarta',
-  }).format(new Date(value))
-  : 'Belum tercatat'
+import { formatDate, formatDateTime, getJakartaDate } from '../utils/dateFormatting'
 
 export function EmployeeDashboard() {
   const { token, user } = useAuth()
@@ -57,7 +38,7 @@ export function EmployeeDashboard() {
         <div>
           <p className="section-kicker">Area karyawan</p>
           <h3>Halo, {user?.nama_lengkap || user?.nama_pengguna}</h3>
-          <p>{formatDate(today)} · Pilih cabang untuk mencatat kehadiran Anda</p>
+          <p>{formatDate(today, 'full')} · Pilih cabang untuk mencatat kehadiran Anda</p>
         </div>
         <Link className="primary-button" to="/absensi">Mulai absensi</Link>
       </section>
@@ -100,7 +81,7 @@ export function EmployeeDashboard() {
                   <span>{record.nama_cabang} · {record.nama_shift || 'Shift belum ditentukan'}</span>
                 </div>
                 <div className="record-side">
-                  <span className="record-time">{formatDateTime(record.waktu_masuk)}</span>
+                  <span className="record-time">{formatDateTime(record.waktu_masuk, 'Belum tercatat')}</span>
                   <span className="status-pill neutral">{record.status_kehadiran}</span>
                 </div>
               </article>
